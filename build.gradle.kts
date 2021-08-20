@@ -14,4 +14,5 @@ repositories {
 dependencies {
     implementation(kotlin("stdlib"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.1")
+    implementation("net.java.dev.jna:jna-platform:5.8.0")
 }

@@ -1,19 +1,25 @@
 package com.github.virusbear.reed
 
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.Closeable
 import java.io.File
 import java.io.PrintWriter
+import java.util.*
 import java.util.concurrent.Executors
 
 class PowerShell(val root: File? = null): Closeable {
-    private val process = ProcessBuilder("powershell", "-nologo", "-noexit").apply {
+    private val process = ProcessBuilder("powershell", "-nologo", "-noexit", "-noninteractive", "-noprofile", "-OutputFormat XML").apply {
         root?.let {
             directory(root)
         }
-    }.start()
+    }.start().also {
+        GlobalScope.launch(Dispatchers.IO) {
+            it.inputStream.copyTo(System.out)
+        }
+    }
 
     private val writer = PrintWriter(process.outputStream.bufferedWriter(), true)
     private val reader = process.inputStream.bufferedReader()
@@ -29,15 +35,9 @@ class PowerShell(val root: File? = null): Closeable {
                 if(closed)
                     error("PowerShell session terminated. Unable to execute command")
 
-                val command = "$cmd; Write-Host \"`0\""
-                writer.println(command)
+                writer.println(cmd)
 
-                reader
-                    .lineSequence()
-                    .drop(command.lines().size)
-                    .takeWhile {
-                        it != "\u0000"
-                    }.joinToString(System.lineSeparator())
+                ""
             }
         }
 
@@ -56,4 +56,14 @@ class PowerShell(val root: File? = null): Closeable {
 
 val Dispatchers.PowerShell: CoroutineDispatcher by lazy {
     Executors.newWorkStealingPool().asCoroutineDispatcher()
+}
+
+fun main() {
+    runBlocking {
+        PowerShell().use { ps ->
+            println(ps.exec("Write-Host 'Hello World';Write-Host 'PS t> b';Write-Host 'Hello World'"))
+            println(ps.exec("Write-Host 'Big Issue'"))
+            Thread.sleep(10000)
+        }
+    }
 }
