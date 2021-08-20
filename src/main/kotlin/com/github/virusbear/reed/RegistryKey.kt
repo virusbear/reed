@@ -1,10 +1,12 @@
 package com.github.virusbear.reed
 
-import com.sun.jna.platform.win32.Advapi32Util
-import com.sun.jna.platform.win32.WinNT
-import com.sun.jna.platform.win32.WinReg
+import com.sun.jna.Pointer
+import com.sun.jna.platform.win32.*
+import com.sun.jna.platform.win32.WinError.ERROR_SUCCESS
 import com.sun.jna.platform.win32.WinReg.HKEY
-import java.rmi.registry.RegistryHandler
+import com.sun.jna.ptr.IntByReference
+import kotlin.time.ExperimentalTime
+import kotlin.time.measureTime
 
 class RegistryKey(val root: Root, val parent: RegistryKey? = null, val path: String) {
     val absolutePath: String
@@ -26,12 +28,35 @@ class RegistryKey(val root: Root, val parent: RegistryKey? = null, val path: Str
             RegistryKey(root, this, it)
         }
 
+    fun values(): List<RegistryValue<*>> =
+        root.useKey(absolutePath) { hkey ->
+            Advapi32Util.registryGetValues(hkey)
+        }.keys.mapNotNull {
+            this[it]
+        }
+
     operator fun get(name: String): RegistryValue<*>? {
-        TODO()
+        if(name !in this) {
+            return null
+        }
+
+        val type = root.useKey(absolutePath) { hkey ->
+            val typeRef = IntByReference()
+            val result = Advapi32.INSTANCE.RegQueryValueEx(hkey, name, 0, typeRef, null as Pointer?, null)
+            if(result != WinNT.ERROR_SUCCESS) {
+                throw Win32Exception(result)
+            }
+
+            typeRef.value
+        }
+
+        return RegistryValueType.forType(type)?.read(this, name)?.let {
+            NamedRegistryValue(name, it)
+        }
     }
 
     operator fun set(name: String, value: RegistryValue<*>) {
-        TODO()
+        value.write(this, name)
     }
 
     operator fun contains(name: String): Boolean =
@@ -85,125 +110,3 @@ class RegistryKey(val root: Root, val parent: RegistryKey? = null, val path: Str
         }
     }
 }
-
-fun main() {
-    val data = RegistryKey(RegistryKey.Root.HKEY_CURRENT_USER, null, "SOFTWARE\\JavaSoft\\Prefs\\google")["device_id"]
-    println(data?.javaClass)
-}
-
-interface RegistryValue<T> {
-    val value: T
-    fun write(key: RegistryKey, name: String)
-    fun read(key: RegistryKey, name: String): RegistryValue<T>?
-}
-
-class StringRegistryValue(override val value: String): RegistryValue<String> {
-    override fun write(key: RegistryKey, name: String) {
-        Advapi32Util.registrySetStringValue(
-            key.root.hkey,
-            key.absolutePath,
-            name,
-            value,
-            WinNT.KEY_SET_VALUE
-        )
-    }
-
-    override fun read(key: RegistryKey, name: String): RegistryValue<String>? =
-        Advapi32Util.registryGetStringValue(
-            key.root.hkey,
-            key.absolutePath,
-            name,
-            WinNT.KEY_QUERY_VALUE
-        )?.let {
-            NamedRegistryValue(name, StringRegistryValue(it))
-        }
-}
-class BinaryRegistryValue(override val value: ByteArray): RegistryValue<ByteArray> {
-    override fun write(key: RegistryKey, name: String) {
-        Advapi32Util.registrySetBinaryValue(
-            key.root.hkey,
-            key.absolutePath,
-            name,
-            value,
-            WinNT.KEY_SET_VALUE
-        )
-    }
-
-    override fun read(key: RegistryKey, name: String): RegistryValue<ByteArray>? =
-        Advapi32Util.registryGetBinaryValue(
-            key.root.hkey,
-            key.absolutePath,
-            name,
-            WinNT.KEY_QUERY_VALUE
-        )?.let {
-            NamedRegistryValue(name, BinaryRegistryValue(value))
-        }
-}
-class IntRegistryValue(override val value: Int): RegistryValue<Int> {
-    override fun write(key: RegistryKey, name: String) {
-        Advapi32Util.registrySetIntValue(
-            key.root.hkey,
-            key.absolutePath,
-            name,
-            value,
-            WinNT.KEY_SET_VALUE
-        )
-    }
-
-    override fun read(key: RegistryKey, name: String): RegistryValue<Int> =
-        Advapi32Util.registryGetIntValue(
-            key.root.hkey,
-            key.absolutePath,
-            name,
-            WinNT.KEY_QUERY_VALUE
-        ).let {
-            NamedRegistryValue(name, IntRegistryValue(it))
-        }
-}
-class LongRegistryValue(override val value: Long): RegistryValue<Long> {
-    override fun write(key: RegistryKey, name: String) {
-        Advapi32Util.registrySetLongValue(
-            key.root.hkey,
-            key.absolutePath,
-            name,
-            value,
-            WinNT.KEY_SET_VALUE
-        )
-    }
-
-    override fun read(key: RegistryKey, name: String): RegistryValue<Long> =
-        Advapi32Util.registryGetLongValue(
-            key.root.hkey,
-            key.absolutePath,
-            name,
-            WinNT.KEY_SET_VALUE
-        ).let {
-            NamedRegistryValue(name, LongRegistryValue(it))
-        }
-}
-class StringArrayRegistryValue(override val value: Array<String>): RegistryValue<Array<String>> {
-    override fun write(key: RegistryKey, name: String) {
-        Advapi32Util.registrySetStringArray(
-            key.root.hkey,
-            key.absolutePath,
-            name,
-            value,
-            WinNT.KEY_SET_VALUE
-        )
-    }
-
-    override fun read(key: RegistryKey, name: String): RegistryValue<Array<String>>? =
-        Advapi32Util.registryGetStringArray(
-            key.root.hkey,
-            key.absolutePath,
-            name,
-            WinNT.KEY_SET_VALUE
-        )?.let {
-            NamedRegistryValue(name, StringArrayRegistryValue(it))
-        }
-}
-
-class NamedRegistryValue<T>(
-    val name: String,
-    private val registryValue: RegistryValue<T>
-): RegistryValue<T> by registryValue
