@@ -1,4 +1,4 @@
-package com.github.virusbear.reed
+package io.github.virusbear.reed
 
 class NamedRegistryValue<T>(
     val name: String,

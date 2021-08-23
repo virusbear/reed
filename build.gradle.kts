@@ -1,5 +1,6 @@
 plugins {
-    kotlin("jvm") version "1.5.21"
+    id("org.jetbrains.dokka") version "1.5.0"
+    kotlin("multiplatform") version "1.5.21"
 }
 
 group = "com.github.virusbear.reed"
@@ -11,7 +12,28 @@ repositories {
     google()
 }
 
+kotlin {
+    jvm {
+        compilations["main"].apply {
+            kotlinOptions {
+                jvmTarget = "11"
+            }
+        }
+    }
+
+    mingwX64("native") {
+        binaries {
+            staticLib()
+        }
+    }
+
+    sourceSets {
+        val jvmMain by getting
+        val nativeMain by getting
+    }
+}
+
 dependencies {
-    implementation(kotlin("stdlib"))
-    implementation("net.java.dev.jna:jna-platform:5.8.0")
+    "commonMainImplementation"(kotlin("stdlib"))
+    "jvmMainApi"("net.java.dev.jna:jna-platform:5.8.0")
 }

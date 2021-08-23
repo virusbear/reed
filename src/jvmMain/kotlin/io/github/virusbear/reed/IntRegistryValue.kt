@@ -1,4 +1,4 @@
-package com.github.virusbear.reed
+package io.github.virusbear.reed
 
 import com.sun.jna.platform.win32.Advapi32Util
 import com.sun.jna.platform.win32.WinNT
