@@ -19,7 +19,7 @@ expect object Registry {
     fun valueExists(root: RegistryRoot, path: String, name: String): Boolean
     fun getKeys(root: RegistryRoot, path: String): List<String>
     fun getValues(root: RegistryRoot, path: String): List<String>
-    fun getValueType(root: RegistryRoot, path: String, name: String): Int
+    fun getValueType(root: RegistryRoot, path: String, name: String): RegistryValueType<*>
 }
 
 expect enum class Sam
@@ -45,25 +45,27 @@ class RegistryKey(val root: RegistryRoot, val parent: RegistryKey? = null, val p
             RegistryKey(root, this, it)
         }
 
-    fun values() {
-        Registry.getValues(root, absolutePath).mapNotNull { name ->
+    fun valueNames(): List<String> =
+        Registry.getValues(root, absolutePath)
+
+    fun values(): List<RegistryValue<*>> =
+        valueNames().mapNotNull { name ->
             this[name]
         }
-    }
 
-    operator fun get(name: String): RegistryValue<*>? {
+    operator fun get(name: String): RegistryValue<*>? =
         if(name !in this) {
-            return null
+            null
+        } else {
+            NamedRegistryValue(
+                name,
+                LazyRegistryValue {
+                    Registry
+                        .getValueType(root, absolutePath, name)
+                        .read(this, name)
+                }
+            )
         }
-
-        return NamedRegistryValue(
-            name,
-            LazyRegistryValue {
-                val valueType = Registry.getValueType(root, absolutePath, name)
-                RegistryValueType.forName(valueType).read(this, name)
-            }
-        )
-    }
 
     operator fun set(name: String, value: RegistryValue<*>) {
         value.write(this, name)
@@ -120,4 +122,8 @@ class LazyRegistryValue<T>(
     override fun write(key: RegistryKey, name: String) {
         registryValue.write(key, name)
     }
+}
+
+interface RegistryValueType<T: RegistryValue<*>> {
+    fun read(key: RegistryKey, name: String): T
 }

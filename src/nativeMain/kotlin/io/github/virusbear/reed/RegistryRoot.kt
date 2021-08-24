@@ -98,6 +98,42 @@ actual object Registry {
             }
         }
 
+    actual fun getValues(root: RegistryRoot, path: String): List<String> =
+        root.useKey(path, Sam.KEY_READ) { hkey ->
+            val valueCount = queryValueCount(hkey)
+
+            (0 until valueCount).map {
+                memScoped {
+                    val bufferLength = alloc<UIntVar>()
+                    bufferLength.value = (queryMaxValueLen(hkey) + 1).toUInt()
+                    val buffer: LPWSTR = allocArray(bufferLength.value.toInt())
+
+                    val status = RegEnumValueW(hkey.ptr, it.toUInt(), buffer, bufferLength.ptr, null, null, null, null)
+                    requireSuccess(status)
+
+                    buffer.toKString()
+                }
+            }
+        }
+
+    actual fun getValueType(root: RegistryRoot, path: String, name: String): RegistryValueType<*> =
+        root.useKey(path, Sam.KEY_READ) { hkey ->
+            memScoped {
+                val type = alloc<UIntVar>()
+                val status = RegQueryValueExW(hkey.ptr, name, 0, type.ptr, null, null)
+                requireSuccess(status)
+
+                when(type.value) {
+                    REG_DWORD -> IntRegistryValue
+                    REG_QWORD -> LongRegistryValue
+                    REG_BINARY -> BinaryRegistryValue
+                    REG_SZ -> StringRegistryValue
+                    REG_MULTI_SZ -> StringArrayRegistryValue
+                    else -> error("No RegistryValueType instance available for type ${type.value}")
+                }
+            }
+        }
+
     private fun querySubKeyCount(hkey: HKEY): Int =
         memScoped {
             val subkeyCount = alloc<UIntVar>()
@@ -107,6 +143,16 @@ actual object Registry {
             subkeyCount.value.toInt()
         }
 
+    private fun queryValueCount(hkey: HKEY): Int =
+        memScoped {
+            val valueCount = alloc<UIntVar>()
+            val status = RegQueryInfoKeyW(hkey.ptr, null, null, null, null, null, null, valueCount.ptr, null, null, null, null)
+
+            requireSuccess(status)
+
+            valueCount.value.toInt()
+        }
+
     private fun queryMaxSubKeyLen(hkey: HKEY): Int =
         memScoped {
             val maxSubkeyLength = alloc<UIntVar>()
@@ -114,6 +160,15 @@ actual object Registry {
             requireSuccess(status)
 
             maxSubkeyLength.value.toInt()
+        }
+
+    private fun queryMaxValueLen(hkey: HKEY): Int =
+        memScoped {
+            val maxValueLength = alloc<UIntVar>()
+            val status = RegQueryInfoKeyW(hkey.ptr, null, null, null, null, maxValueLength.ptr, null, null, null, null, null, null)
+            requireSuccess(status)
+
+            maxValueLength.value.toInt()
         }
 }
 
@@ -140,3 +195,27 @@ fun formatWin32Error(status: Int): String =
 
         message?.toKString() ?: "Error Code $status"
     }
+
+class BinaryRegistryValue(override val value: ByteArray): RegistryValue<ByteArray> {
+    override fun write(key: RegistryKey, name: String) {
+        key.root.useKey(key.absolutePath, Sam.KEY_WRITE) { hkey ->
+            value.usePinned { pinned ->
+                RegSetValueExW(hkey.ptr, name, 0, REG_BINARY, pinned.addressOf(0).reinterpret(), value.size.toUInt())
+            }
+        }
+    }
+
+    companion object: RegistryValueType<BinaryRegistryValue> {
+        override fun read(key: RegistryKey, name: String): BinaryRegistryValue =
+            memScoped {
+                val bufferSize = alloc<UIntVar>()
+                RegGetValueW(key.root.hkey, key.absolutePath, name, (RRF_RT_REG_BINARY or RRF_ZEROONFAILURE).toUInt(), null, null, bufferSize.ptr)
+
+                ByteArray(bufferSize.value.toInt()).apply {
+                    usePinned {
+                        RegGetValueW(key.root.hkey, key.absolutePath, name, (RRF_RT_REG_BINARY or RRF_ZEROONFAILURE).toUInt(), null, it.addressOf(0), bufferSize.ptr)
+                    }
+                }.let(::BinaryRegistryValue)
+            }
+    }
+}
