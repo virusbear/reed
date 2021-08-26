@@ -28,7 +28,7 @@ expect class HKEY
 
 class RegistryKey(val root: RegistryRoot, val parent: RegistryKey? = null, val path: String) {
     val absolutePath: String by lazy {
-        (parent?.let { "${it.absolutePath}\\" } ?: "") + path
+        ((parent?.let { "${it.absolutePath}\\" } ?: "") + path).trimStart('\\')
     }
 
     val exists: Boolean
@@ -38,7 +38,7 @@ class RegistryKey(val root: RegistryRoot, val parent: RegistryKey? = null, val p
         RegistryKey(root, this, path)
 
     fun list(): List<String> =
-        Registry.getKeys(root, path)
+        Registry.getKeys(root, absolutePath)
 
     fun listKeys(): List<RegistryKey> =
         list().map {

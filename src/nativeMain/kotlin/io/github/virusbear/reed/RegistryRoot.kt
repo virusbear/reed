@@ -1,6 +1,7 @@
 package io.github.virusbear.reed
 
 import kotlinx.cinterop.*
+import kotlinx.cinterop.nativeHeap.alloc
 import platform.windows.*
 
 actual typealias HKEY = HKEY__
@@ -38,7 +39,7 @@ actual object Registry {
             val phkey = alloc<HKEYVar>()
             val status = RegOpenKeyExW(root.hkey, path, 0, sam.sam.toUInt(), phkey.ptr)
 
-            requireSuccess(status) { "Unable to open registry key. Registry.openKey failed with error \"$it\"" }
+            requireSuccess(status) { "Unable to open registry key $root\\$path. Registry.openKey failed with error \"$it\"" }
 
             phkey.pointed ?: error("RegOpenKeyExW did not return handle to open registry key")
         }
@@ -105,7 +106,7 @@ actual object Registry {
             (0 until valueCount).map {
                 memScoped {
                     val bufferLength = alloc<UIntVar>()
-                    bufferLength.value = (queryMaxValueLen(hkey) + 1).toUInt()
+                    bufferLength.value = (queryMaxValueNameLen(hkey) + 1).toUInt()
                     val buffer: LPWSTR = allocArray(bufferLength.value.toInt())
 
                     val status = RegEnumValueW(hkey.ptr, it.toUInt(), buffer, bufferLength.ptr, null, null, null, null)
@@ -120,15 +121,15 @@ actual object Registry {
         root.useKey(path, Sam.KEY_READ) { hkey ->
             memScoped {
                 val type = alloc<UIntVar>()
-                val status = RegQueryValueExW(hkey.ptr, name, 0, type.ptr, null, null)
+                val status = RegQueryValueExW(hkey.ptr, name, null, type.ptr, null, null)
                 requireSuccess(status)
 
-                when(type.value) {
+                when(type.value.toInt()) {
                     REG_DWORD -> IntRegistryValue
                     REG_QWORD -> LongRegistryValue
                     REG_BINARY -> BinaryRegistryValue
                     REG_SZ -> StringRegistryValue
-                    REG_MULTI_SZ -> StringArrayRegistryValue
+                    REG_MULTI_SZ -> throw NotImplementedError("MULTI_SZ not supported yet")
                     else -> error("No RegistryValueType instance available for type ${type.value}")
                 }
             }
@@ -162,18 +163,18 @@ actual object Registry {
             maxSubkeyLength.value.toInt()
         }
 
-    private fun queryMaxValueLen(hkey: HKEY): Int =
+    private fun queryMaxValueNameLen(hkey: HKEY): Int =
         memScoped {
-            val maxValueLength = alloc<UIntVar>()
-            val status = RegQueryInfoKeyW(hkey.ptr, null, null, null, null, maxValueLength.ptr, null, null, null, null, null, null)
+            val maxValueNameLength = alloc<UIntVar>()
+            val status = RegQueryInfoKeyW(hkey.ptr, null, null, null, null, null, null, null, maxValueNameLength.ptr, null, null, null)
             requireSuccess(status)
 
-            maxValueLength.value.toInt()
+            maxValueNameLength.value.toInt()
         }
 }
 
 fun requireSuccess(status: Int, block: (String) -> String = { it }) {
-    check(status != ERROR_SUCCESS) {
+    check(status == ERROR_SUCCESS) {
         block(formatWin32Error(status))
     }
 }
@@ -216,6 +217,86 @@ class BinaryRegistryValue(override val value: ByteArray): RegistryValue<ByteArra
                         RegGetValueW(key.root.hkey, key.absolutePath, name, (RRF_RT_REG_BINARY or RRF_ZEROONFAILURE).toUInt(), null, it.addressOf(0), bufferSize.ptr)
                     }
                 }.let(::BinaryRegistryValue)
+            }
+    }
+}
+
+class IntRegistryValue(override val value: UInt): RegistryValue<UInt> {
+    override fun write(key: RegistryKey, name: String) {
+        key.root.useKey(key.absolutePath, Sam.KEY_WRITE) { hkey ->
+            memScoped {
+                val data = alloc<UIntVar> { value = this@IntRegistryValue.value }
+                val status = RegSetValueExW(hkey.ptr, name, 0, REG_DWORD, data.ptr.reinterpret(), sizeOf<DWORDVar>().convert())
+
+                requireSuccess(status)
+            }
+        }
+    }
+
+    companion object: RegistryValueType<IntRegistryValue> {
+        override fun read(key: RegistryKey, name: String): IntRegistryValue =
+            memScoped {
+                val data = alloc<UIntVar>()
+                val status = RegGetValueW(key.root.hkey, key.absolutePath, name, RRF_RT_REG_DWORD, null, data.ptr, null)
+
+                requireSuccess(status)
+
+                IntRegistryValue(data.value)
+            }
+    }
+}
+
+class LongRegistryValue(override val value: ULong): RegistryValue<ULong> {
+    override fun write(key: RegistryKey, name: String) {
+        key.root.useKey(key.absolutePath, Sam.KEY_WRITE) { hkey ->
+            memScoped {
+                val data = alloc<ULongVar> { value = this@LongRegistryValue.value }
+                val status = RegSetValueExW(hkey.ptr, name, 0, REG_QWORD, data.ptr.reinterpret(), sizeOf<DWORD64Var>().convert())
+
+                requireSuccess(status)
+            }
+        }
+    }
+
+    companion object: RegistryValueType<LongRegistryValue> {
+        override fun read(key: RegistryKey, name: String): LongRegistryValue =
+            memScoped {
+                val data = alloc<ULongVar>()
+                val status = RegGetValueW(key.root.hkey, key.absolutePath, name, (RRF_RT_REG_QWORD or RRF_ZEROONFAILURE).toUInt(), null, data.ptr, null)
+
+                requireSuccess(status)
+
+                LongRegistryValue(data.value)
+            }
+    }
+}
+
+class StringRegistryValue(override val value: String): RegistryValue<String> {
+    override fun write(key: RegistryKey, name: String) {
+        key.root.useKey(key.absolutePath, Sam.KEY_WRITE) { hkey ->
+            memScoped {
+                val buf = alloc<COpaquePointerVar>()
+                value.cstr.place(buf.reinterpret())
+                val status = RegSetValueExW(hkey.ptr, name, 0, REG_SZ, buf.reinterpret(), value.cstr.size.toUInt())
+
+                requireSuccess(status)
+            }
+        }
+    }
+
+    companion object: RegistryValueType<StringRegistryValue> {
+        override fun read(key: RegistryKey, name: String): StringRegistryValue =
+            memScoped {
+                val bufferSize = alloc<UIntVar>()
+                RegGetValueW(key.root.hkey, key.absolutePath, name, (RRF_RT_REG_SZ or RRF_ZEROONFAILURE).toUInt(), null, null, bufferSize.ptr)
+
+                ByteArray(bufferSize.value.toInt()).apply {
+                    usePinned {
+                        RegGetValueW(key.root.hkey, key.absolutePath, name, (RRF_RT_REG_SZ or RRF_ZEROONFAILURE).toUInt(), null, it.addressOf(0), bufferSize.ptr)
+                    }
+                }.let {
+                    StringRegistryValue(it.toKString())
+                }
             }
     }
 }
