@@ -11,7 +11,7 @@ class BinaryRegistryValue(override val value: ByteArray): RegistryValue<ByteArra
     }
 
     companion object: RegistryValueType<BinaryRegistryValue> {
-        override fun read(key: RegistryKey, name: String): RegistryValue<ByteArray> =
+        override fun read(key: RegistryKey, name: String): BinaryRegistryValue =
             Advapi32Util.registryGetBinaryValue(
                 key.root.hkey, key.absolutePath, name, WinNT.KEY_QUERY_VALUE
             )?.let(::BinaryRegistryValue) ?: error("Unable to read value $name from registry key $key")

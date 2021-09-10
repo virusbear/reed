@@ -1,6 +1,7 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
-    id("org.jetbrains.dokka") version "1.5.0"
-    kotlin("multiplatform") version "1.5.21"
+    kotlin("jvm") version "1.5.21"
 }
 
 group = "com.github.virusbear.reed"
@@ -12,28 +13,11 @@ repositories {
     google()
 }
 
-kotlin {
-    jvm {
-        compilations["main"].apply {
-            kotlinOptions {
-                jvmTarget = "11"
-            }
-        }
-    }
-
-    mingwX64("native") {
-        binaries {
-            staticLib()
-        }
-    }
-
-    sourceSets {
-        val jvmMain by getting
-        val nativeMain by getting
-    }
+tasks.withType<KotlinCompile> {
+    kotlinOptions.jvmTarget = "11"
 }
 
 dependencies {
-    "commonMainImplementation"(kotlin("stdlib"))
-    "jvmMainApi"("net.java.dev.jna:jna-platform:5.8.0")
+    implementation(kotlin("stdlib"))
+    api("net.java.dev.jna:jna-platform:5.8.0")
 }

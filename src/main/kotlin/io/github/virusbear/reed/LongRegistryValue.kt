@@ -11,7 +11,7 @@ class LongRegistryValue(override val value: Long): RegistryValue<Long> {
     }
 
     companion object: RegistryValueType<LongRegistryValue> {
-        override fun read(key: RegistryKey, name: String): RegistryValue<Long> =
+        override fun read(key: RegistryKey, name: String): LongRegistryValue =
             Advapi32Util.registryGetLongValue(
                 key.root.hkey, key.absolutePath, name, WinNT.KEY_QUERY_VALUE
             ).let(::LongRegistryValue)

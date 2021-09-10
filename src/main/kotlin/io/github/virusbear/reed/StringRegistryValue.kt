@@ -11,9 +11,9 @@ class StringRegistryValue(override val value: String): RegistryValue<String> {
     }
 
     companion object: RegistryValueType<StringRegistryValue> {
-        override fun read(key: RegistryKey, name: String): RegistryValue<String>? =
+        override fun read(key: RegistryKey, name: String): StringRegistryValue =
             Advapi32Util.registryGetStringValue(
                 key.root.hkey, key.absolutePath, name, WinNT.KEY_QUERY_VALUE
-            )?.let(::StringRegistryValue)
+            )?.let(::StringRegistryValue) ?: error("Unable to read value $name from registry key $key")
     }
 }

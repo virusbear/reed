@@ -11,7 +11,7 @@ class IntRegistryValue(override val value: Int): RegistryValue<Int> {
     }
 
     companion object: RegistryValueType<IntRegistryValue> {
-        override fun read(key: RegistryKey, name: String): RegistryValue<Int> =
+        override fun read(key: RegistryKey, name: String): IntRegistryValue =
             Advapi32Util.registryGetIntValue(
                 key.root.hkey, key.absolutePath, name, WinNT.KEY_QUERY_VALUE
             ).let(::IntRegistryValue)
